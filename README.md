@@ -123,11 +123,13 @@ go-mqtt-bench pub -h 127.0.0.1 -t t -c 20 -I 100 -s 256 -q 0
 | `--cacertfile` | | | CA 证书路径 |
 | `--certfile` | | | 客户端证书路径 |
 | `--keyfile` | | | 客户端私钥路径 |
-| `--ws` | | false | WebSocket（暂未实现） |
+| `--ws` | | false | 启用 WebSocket 传输 |
 | `--quic` | | false | QUIC（暂未实现） |
 | `--prometheus` | | false | 启用 Prometheus 指标 |
 | `--restapi` | | | REST API 监听地址 |
 | `--log-to` | | console | 日志输出 (console/null) |
+| `--config` | | | JSON 配置文件路径 |
+| `--report` | | | 导出压测报告 (.json/.csv/.html) |
 
 ## pub 额外参数
 
@@ -178,7 +180,7 @@ go-mqtt-bench pub -h 127.0.0.1 -t t -c 20 -I 100 -s 256 -q 0
   sysctl -w net.ipv4.ip_local_port_range="1024 65535"
   sysctl -w net.ipv4.tcp_tw_reuse=1
   ```
-- **多 IP 分发**：使用 `--ifaddr` 指定多个本地 IP（逗号分隔，二期支持）
+- **多 IP 分发**：使用 `--ifaddr` 指定多个本地 IP（逗号分隔），客户端轮询分配
 - **GOMAXPROCS**：工具默认使用 `runtime.NumCPU()`
 
 ## 统计输出
@@ -191,13 +193,91 @@ recv(total): total=2102563, rate=99725(msg/sec), bytes_rate=24.3 MB/sec
 
 按 `Ctrl+C` 优雅退出，退出时显示最终统计摘要。
 
+## 进阶功能
+
+### WebSocket 连接
+
+```bash
+go-mqtt-bench conn -h broker.example.com -p 8083 --ws
+go-mqtt-bench pub -t test -h broker.example.com -p 8084 --ws --ssl --cacertfile ca.pem
+```
+
+使用 `--ws` 启用 MQTT over WebSocket，配合 `--ssl` 时自动使用 `wss://`。
+
+### JSON 配置文件
+
+```bash
+go-mqtt-bench pub --config config.json
+```
+
+CLI 参数优先级高于 JSON 配置。示例见 `config.example.json`。
+
+### Prometheus 指标
+
+```bash
+go-mqtt-bench pub -t test -c 100 --prometheus --restapi :9090
+```
+
+访问 `http://localhost:9090/metrics` 查看 Prometheus 格式指标。
+
+### Docker
+
+```bash
+docker build -t go-mqtt-bench .
+docker run --rm go-mqtt-bench conn -h host.docker.internal -c 100
+```
+
+### 多本地 IP 绑定
+
+```bash
+go-mqtt-bench conn -h broker --ifaddr 192.168.1.10,192.168.1.11 -c 100000
+```
+
+客户端按轮询分配到不同的本地 IP，突破单 IP 64K 端口限制。
+
+### 延迟统计
+
+```bash
+# pub 端添加 ts header
+go-mqtt-bench pub -t test -c 10 --payload-hdrs ts
+
+# sub 端解析 ts header，自动统计端到端延迟
+go-mqtt-bench sub -t test -c 10 --payload-hdrs ts
+```
+
+终端输出每秒 p50/p90/p95/p99 延迟。
+
+### 乱序检测
+
+```bash
+go-mqtt-bench pub -t bench/%i -c 10 --payload-hdrs cnt64
+go-mqtt-bench sub -t bench/%i -c 10 --payload-hdrs cnt64
+```
+
+订阅端按 topic 追踪 cnt64 序列号，检测消息乱序。
+
+### 报告导出
+
+```bash
+# 导出 JSON 报告（适合程序解析）
+go-mqtt-bench pub -t test -c 100 --report result.json
+
+# 导出 CSV 报告（适合 Excel 分析）
+go-mqtt-bench sub -t test -c 100 --payload-hdrs ts --report result.csv
+
+# 导出 HTML 报告（浏览器直接查看）
+go-mqtt-bench conn -h broker -c 10000 --report result.html
+```
+
+报告包含连接、发布/订阅、延迟统计的完整数据，格式根据扩展名自动选择。
+
 ## 编译
 
 ```bash
 make build    # 编译当前平台
 make test     # 运行测试
 make lint     # 代码检查
-make release  # 多平台交叉编译
+make package  # 全平台交叉编译 + 打包 tar.gz/zip
 ```
 
 ## 项目结构
@@ -219,14 +299,16 @@ main.go
 - [x] MVP: conn/sub/pub 三个子命令
 - [x] TCP MQTT 3.1.1 / 5.0
 - [x] 用户名密码、KeepAlive、Clean Session
-- [x] TLS 单向认证
+- [x] TLS 单向认证（mTLS 双向认证已支持）
 - [x] Topic 占位符
 - [x] 每秒统计输出
 - [x] Ctrl+C 优雅退出
-- [ ] Prometheus /metrics
-- [ ] mTLS 双向认证
-- [ ] hdrhistogram-go 替换简易直方图
-- [ ] WebSocket 支持
+- [x] WebSocket 传输 (ws:// / wss://)
+- [x] 多 ifaddr 轮询绑定
+- [x] hdrhistogram-go 延迟直方图
+- [x] cnt64 乱序检测
+- [x] JSON 配置文件
+- [x] Prometheus /metrics 端点
+- [x] Dockerfile
 - [ ] QUIC 支持
-- [ ] JSON 配置文件
-- [ ] Dockerfile 和 CI
+- [ ] GitHub Actions CI

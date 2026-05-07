@@ -11,8 +11,9 @@ import (
 )
 
 var (
-	// logTo 全局日志输出目标，由 PersistentPreRun 传入 log.Init
-	logTo string
+	logTo      string // 全局日志输出目标
+	configFile string // JSON 配置文件路径
+	reportFile string // 压测报告导出路径
 )
 
 // rootCmd 是 CLI 的根命令，负责注册全局标志和日志初始化。
@@ -28,6 +29,8 @@ var rootCmd = &cobra.Command{
 
 func init() {
 	rootCmd.PersistentFlags().StringVar(&logTo, "log-to", "console", "日志输出: console 或 null")
+	rootCmd.PersistentFlags().StringVar(&configFile, "config", "", "JSON 配置文件路径")
+	rootCmd.PersistentFlags().StringVar(&reportFile, "report", "", "导出压测报告 (.json/.csv/.html)")
 }
 
 // Execute 执行根命令，入口由 main 调用。

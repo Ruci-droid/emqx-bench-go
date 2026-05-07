@@ -18,6 +18,8 @@ type Collector struct {
 
 	SubRecvTotal atomic.Int64
 	SubRecvBytes atomic.Int64
+
+	OutOfOrder atomic.Int64 // cnt64 乱序计数
 }
 
 // Snapshot 是所有计数器的快照，用于 Reporter 计算速率。
@@ -34,6 +36,7 @@ type Snapshot struct {
 	PubBytes      int64
 	SubRecvTotal  int64
 	SubRecvBytes  int64
+	OutOfOrder    int64
 }
 
 // TakeSnapshot 无锁地读取所有计数器当前值。
@@ -50,5 +53,6 @@ func (c *Collector) TakeSnapshot() Snapshot {
 		PubBytes:      c.PubBytes.Load(),
 		SubRecvTotal:  c.SubRecvTotal.Load(),
 		SubRecvBytes:  c.SubRecvBytes.Load(),
+		OutOfOrder:    c.OutOfOrder.Load(),
 	}
 }

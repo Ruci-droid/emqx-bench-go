@@ -15,9 +15,10 @@ import (
 // ConnRunner 负责连接压测：创建大量 MQTT 连接并保持，统计连接成功/失败/断开等指标。
 type ConnRunner struct {
 	*BaseRunner
-	cfg    config.ConnConfig
-	hosts  []string      // 解析后的 Broker 地址列表
-	active atomic.Int32  // 当前活跃连接数
+	cfg     config.ConnConfig
+	hosts   []string      // 解析后的 Broker 地址列表
+	ifAddrs []string      // 解析后的本地绑定 IP 列表
+	active  atomic.Int32  // 当前活跃连接数
 
 	clients []*mqtt.Client
 	mu      sync.Mutex
@@ -33,6 +34,7 @@ func NewConnRunner(cfg config.ConnConfig) (*ConnRunner, error) {
 		BaseRunner: base,
 		cfg:        cfg,
 		hosts:      cfg.Common.Hosts(),
+		ifAddrs:    cfg.Common.IfAddrs(),
 	}, nil
 }
 
@@ -64,6 +66,11 @@ func (r *ConnRunner) Run(ctx context.Context) error {
 			i,
 		)
 
+		localAddr := ""
+		if len(r.ifAddrs) > 0 {
+			localAddr = r.ifAddrs[i%len(r.ifAddrs)]
+		}
+
 		client, err := mqtt.NewClient(mqtt.ClientOptions{
 			Index:         int64(i),
 			ClientID:      clientID,
@@ -76,7 +83,8 @@ func (r *ConnRunner) Run(ctx context.Context) error {
 			CleanSession:  r.cfg.Common.Clean,
 			SessionExpiry: r.cfg.Common.SessionExpiry,
 			TLSConfig:     r.tlsConfig,
-			LocalAddr:     r.cfg.Common.IfAddr,
+			LocalAddr:     localAddr,
+			WebSocket:     r.cfg.Common.WS,
 			OnDisconnect: func(c *mqtt.Client, err error) {
 				r.collector.Disconnects.Add(1)
 				r.active.Add(-1)

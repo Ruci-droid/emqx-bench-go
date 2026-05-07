@@ -46,6 +46,7 @@ type ClientOptions struct {
 	SessionExpiry int         // MQTT 5 Session Expiry
 	TLSConfig     *tls.Config // TLS 配置
 	LocalAddr     string      // 本地绑定地址
+	WebSocket     bool        // 使用 WebSocket 传输
 
 	OnConnect    ConnectHandler
 	OnDisconnect DisconnectHandler
@@ -70,9 +71,15 @@ func NewClient(opts ClientOptions) (*Client, error) {
 
 	connOpts := paho.NewClientOptions()
 
-	// 构造 Broker URI
+	// 构造 Broker URI: tcp / ssl / ws / wss
 	scheme := "tcp"
-	if opts.TLSConfig != nil {
+	if opts.WebSocket {
+		if opts.TLSConfig != nil {
+			scheme = "wss"
+		} else {
+			scheme = "ws"
+		}
+	} else if opts.TLSConfig != nil {
 		scheme = "ssl"
 	}
 	uri := fmt.Sprintf("%s://%s:%d", scheme, opts.Host, opts.Port)

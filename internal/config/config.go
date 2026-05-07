@@ -33,6 +33,18 @@ type CommonConfig struct {
 	LogTo           string   // 日志输出: "console" 或 "null"
 }
 
+// IfAddrs 解析逗号分隔的本地绑定 IP 字符串，返回切片。
+func (c CommonConfig) IfAddrs() []string {
+	var addrs []string
+	for _, a := range strings.Split(c.IfAddr, ",") {
+		a = strings.TrimSpace(a)
+		if a != "" {
+			addrs = append(addrs, a)
+		}
+	}
+	return addrs
+}
+
 // Hosts 解析逗号分隔的 host 字符串，返回切片。
 func (c CommonConfig) Hosts() []string {
 	var hosts []string

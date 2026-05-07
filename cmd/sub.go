@@ -40,7 +40,7 @@ func init() {
 	subCmd.Flags().String("cacertfile", "", "CA 证书文件路径")
 	subCmd.Flags().String("certfile", "", "客户端证书文件路径")
 	subCmd.Flags().String("keyfile", "", "客户端私钥文件路径")
-	subCmd.Flags().Bool("ws", false, "启用 WebSocket（暂未实现）")
+	subCmd.Flags().Bool("ws", false, "启用 WebSocket 传输")
 	subCmd.Flags().Bool("quic", false, "启用 QUIC（暂未实现）")
 	subCmd.Flags().Bool("prometheus", false, "启用 Prometheus 指标")
 	subCmd.Flags().String("restapi", "", "REST API 监听地址")
@@ -59,26 +59,26 @@ var subCmd = &cobra.Command{
 	Short: "订阅压测",
 	Long:  "创建 MQTT 订阅客户端来测试消息接收吞吐量。",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if ws, _ := cmd.Flags().GetBool("ws"); ws {
-			return fmt.Errorf("WebSocket 传输在此版本中未实现")
-		}
 		if quic, _ := cmd.Flags().GetBool("quic"); quic {
 			return fmt.Errorf("QUIC 传输在此版本中未实现")
 		}
 
 		common := parseCommonConfig(cmd)
-
-		cfg := config.SubConfig{
+		subCfg := config.SubConfig{
 			Common:      common,
 			Topic:       mustString(cmd, "topic"),
 			QoS:         mustInt(cmd, "qos"),
 			PayloadHdrs: mustString(cmd, "payload-hdrs"),
 		}
+		applyJSONConfig(&common, nil, &subCfg)
+		subCfg.Common = common
 
-		runner, err := bench.NewSubRunner(cfg)
+		runner, err := bench.NewSubRunner(subCfg)
 		if err != nil {
 			return fmt.Errorf("创建 sub runner 失败: %w", err)
 		}
+
+		startPrometheus(common, runner.Stats())
 
 		reporter := stats.NewReporter(runner.Stats(), runner.Histogram(), "sub")
 		reporter.Start(1 * time.Second)
@@ -90,6 +90,7 @@ var subCmd = &cobra.Command{
 
 		reporter.Stop()
 		reporter.PrintFinal()
+		saveReport("sub", runner, reporter)
 
 		return nil
 	},

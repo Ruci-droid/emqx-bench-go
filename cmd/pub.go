@@ -40,7 +40,7 @@ func init() {
 	pubCmd.Flags().String("cacertfile", "", "CA 证书文件路径")
 	pubCmd.Flags().String("certfile", "", "客户端证书文件路径")
 	pubCmd.Flags().String("keyfile", "", "客户端私钥文件路径")
-	pubCmd.Flags().Bool("ws", false, "启用 WebSocket（暂未实现）")
+	pubCmd.Flags().Bool("ws", false, "启用 WebSocket 传输")
 	pubCmd.Flags().Bool("quic", false, "启用 QUIC（暂未实现）")
 	pubCmd.Flags().Bool("prometheus", false, "启用 Prometheus 指标")
 	pubCmd.Flags().String("restapi", "", "REST API 监听地址")
@@ -70,16 +70,12 @@ var pubCmd = &cobra.Command{
 	Short: "发布压测",
 	Long:  "创建 MQTT 发布客户端，按指定速率持续发布消息。",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if ws, _ := cmd.Flags().GetBool("ws"); ws {
-			return fmt.Errorf("WebSocket 传输在此版本中未实现")
-		}
 		if quic, _ := cmd.Flags().GetBool("quic"); quic {
 			return fmt.Errorf("QUIC 传输在此版本中未实现")
 		}
 
 		common := parseCommonConfig(cmd)
-
-		cfg := config.PubConfig{
+		pubCfg := config.PubConfig{
 			Common:            common,
 			Topic:             mustString(cmd, "topic"),
 			QoS:               mustInt(cmd, "qos"),
@@ -96,11 +92,15 @@ var pubCmd = &cobra.Command{
 			PayloadHdrs:       mustString(cmd, "payload-hdrs"),
 			TopicsPayloadFile: mustString(cmd, "topics-payload"),
 		}
+		applyJSONConfig(&common, &pubCfg, nil)
+		pubCfg.Common = common
 
-		runner, err := bench.NewPubRunner(cfg)
+		runner, err := bench.NewPubRunner(pubCfg)
 		if err != nil {
 			return fmt.Errorf("创建 pub runner 失败: %w", err)
 		}
+
+		startPrometheus(common, runner.Stats())
 
 		reporter := stats.NewReporter(runner.Stats(), runner.Histogram(), "pub")
 		reporter.Start(1 * time.Second)
@@ -112,6 +112,7 @@ var pubCmd = &cobra.Command{
 
 		reporter.Stop()
 		reporter.PrintFinal()
+		saveReport("pub", runner, reporter)
 
 		return nil
 	},

@@ -1,0 +1,21 @@
+{
+  "common": {
+    "host": "127.0.0.1",
+    "port": 1883,
+    "version": 5,
+    "count": 1000,
+    "connrate": 100,
+    "keepalive": 300
+  },
+  "pub": {
+    "topic": "bench/%i",
+    "qos": 0,
+    "size": 256,
+    "interval_of_msg": 10
+  },
+  "sub": {
+    "topic": "bench/%i",
+    "qos": 0,
+    "payload_hdrs": "ts"
+  }
+}

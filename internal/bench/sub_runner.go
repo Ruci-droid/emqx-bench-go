@@ -17,12 +17,14 @@ import (
 // SubRunner 负责订阅压测：创建指定数量的订阅客户端，统计消息接收速率。
 type SubRunner struct {
 	*BaseRunner
-	cfg    config.SubConfig
-	hosts  []string      // 解析后的 Broker 地址列表
-	active atomic.Int32  // 当前活跃连接数
+	cfg      config.SubConfig
+	hosts    []string      // 解析后的 Broker 地址列表
+	ifAddrs  []string      // 解析后的本地绑定 IP 列表
+	active   atomic.Int32  // 当前活跃连接数
 
-	clients []*mqtt.Client
-	mu      sync.Mutex
+	clients  []*mqtt.Client
+	mu       sync.Mutex
+	lastCnts sync.Map // map[string]uint64, 每个 topic 最后收到的 cnt64 值, 用于乱序检测
 }
 
 // NewSubRunner 创建订阅压测 Runner。
@@ -35,6 +37,7 @@ func NewSubRunner(cfg config.SubConfig) (*SubRunner, error) {
 		BaseRunner: base,
 		cfg:        cfg,
 		hosts:      cfg.Common.Hosts(),
+		ifAddrs:    cfg.Common.IfAddrs(),
 	}, nil
 }
 
@@ -76,6 +79,11 @@ func (r *SubRunner) Run(ctx context.Context) error {
 		}
 		topic := mqtt.RenderTopic(r.cfg.Topic, info)
 
+		localAddr := ""
+		if len(r.ifAddrs) > 0 {
+			localAddr = r.ifAddrs[i%len(r.ifAddrs)]
+		}
+
 		client, err := mqtt.NewClient(mqtt.ClientOptions{
 			Index:         int64(i),
 			ClientID:      clientID,
@@ -88,7 +96,8 @@ func (r *SubRunner) Run(ctx context.Context) error {
 			CleanSession:  r.cfg.Common.Clean,
 			SessionExpiry: r.cfg.Common.SessionExpiry,
 			TLSConfig:     r.tlsConfig,
-			LocalAddr:     r.cfg.Common.IfAddr,
+			LocalAddr:     localAddr,
+			WebSocket:     r.cfg.Common.WS,
 			OnDisconnect: func(c *mqtt.Client, err error) {
 				r.collector.Disconnects.Add(1)
 				r.active.Add(-1)
@@ -97,13 +106,26 @@ func (r *SubRunner) Run(ctx context.Context) error {
 				r.collector.SubRecvTotal.Add(1)
 				r.collector.SubRecvBytes.Add(int64(len(payload)))
 
-				// 如果有 ts header，计算端到端延迟
+				// 解析 payload headers
 				if len(hdrs) > 0 && len(payload) >= hdrSize {
-					_, ts, _ := mqtt.ParseHeader(hdrs, payload)
+					cnt64, ts, _ := mqtt.ParseHeader(hdrs, payload)
+
+					// cnt64 乱序检测: 每个 topic 独立跟踪最后收到的序列号
 					if ts > 0 {
 						sendTime := time.Unix(0, ts)
 						latency := time.Since(sendTime)
 						r.histogram.Record(latency)
+					}
+
+					// 检查 cnt64 是否严格递增
+					if hasHeader(hdrs, mqtt.HdrCnt64) {
+						if last, ok := r.lastCnts.Load(topic); ok {
+							lastVal := last.(uint64)
+							if cnt64 <= lastVal {
+								r.collector.OutOfOrder.Add(1)
+							}
+						}
+						r.lastCnts.Store(topic, cnt64)
 					}
 				}
 			},
@@ -197,4 +219,14 @@ func parseHdrs(s string) []string {
 		}
 	}
 	return result
+}
+
+// hasHeader 检查 header 列表中是否包含指定类型。
+func hasHeader(headers []string, name string) bool {
+	for _, h := range headers {
+		if h == name {
+			return true
+		}
+	}
+	return false
 }

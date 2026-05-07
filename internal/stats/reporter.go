@@ -55,6 +55,11 @@ func (r *Reporter) Stop() {
 	close(r.done)
 }
 
+// Elapsed 返回自 Start 以来的运行时长。
+func (r *Reporter) Elapsed() time.Duration {
+	return time.Since(r.startTime)
+}
+
 func (r *Reporter) loop() {
 	for {
 		select {
@@ -162,8 +167,8 @@ func (r *Reporter) PrintFinal() {
 			float64(cur.PubSuccess)/total)
 	}
 	if cur.SubRecvTotal > 0 {
-		fmt.Fprintf(r.output, "订阅: 接收=%d 字节=%d 速率=%.1f 条/秒\n",
-			cur.SubRecvTotal, cur.SubRecvBytes, float64(cur.SubRecvTotal)/total)
+		fmt.Fprintf(r.output, "订阅: 接收=%d 字节=%d 速率=%.1f 条/秒 乱序=%d\n",
+			cur.SubRecvTotal, cur.SubRecvBytes, float64(cur.SubRecvTotal)/total, cur.OutOfOrder)
 	}
 }
 

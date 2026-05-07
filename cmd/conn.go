@@ -41,7 +41,7 @@ func init() {
 	connCmd.Flags().String("cacertfile", "", "CA 证书文件路径")
 	connCmd.Flags().String("certfile", "", "客户端证书文件路径")
 	connCmd.Flags().String("keyfile", "", "客户端私钥文件路径")
-	connCmd.Flags().Bool("ws", false, "启用 WebSocket（暂未实现）")
+	connCmd.Flags().Bool("ws", false, "启用 WebSocket 传输")
 	connCmd.Flags().Bool("quic", false, "启用 QUIC（暂未实现）")
 	connCmd.Flags().Bool("prometheus", false, "启用 Prometheus 指标")
 	connCmd.Flags().String("restapi", "", "REST API 监听地址，例如 :9090")
@@ -53,21 +53,24 @@ var connCmd = &cobra.Command{
 	Short: "连接压测",
 	Long:  "创建大量 MQTT 连接来测试 Broker 的连接容量。",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if ws, _ := cmd.Flags().GetBool("ws"); ws {
-			return fmt.Errorf("WebSocket 传输在此版本中未实现")
-		}
 		if quic, _ := cmd.Flags().GetBool("quic"); quic {
 			return fmt.Errorf("QUIC 传输在此版本中未实现")
 		}
 
+		common := parseCommonConfig(cmd)
+		applyJSONConfig(&common, nil, nil)
+
 		cfg := config.ConnConfig{
-			Common: parseCommonConfig(cmd),
+			Common: common,
 		}
 
 		runner, err := bench.NewConnRunner(cfg)
 		if err != nil {
 			return fmt.Errorf("创建 conn runner 失败: %w", err)
 		}
+
+		// 启动 Prometheus 指标导出
+		startPrometheus(common, runner.Stats())
 
 		reporter := stats.NewReporter(runner.Stats(), runner.Histogram(), "conn")
 		reporter.Start(1 * time.Second)
@@ -79,6 +82,7 @@ var connCmd = &cobra.Command{
 
 		reporter.Stop()
 		reporter.PrintFinal()
+		saveReport("conn", runner, reporter)
 
 		return nil
 	},
@@ -153,5 +157,94 @@ func parseCommonConfig(cmd *cobra.Command) config.CommonConfig {
 		Prometheus:      prom,
 		RestAPI:         restAPI,
 		LogTo:           logTo,
+	}
+}
+
+// applyJSONConfig 如果指定了 --config，将 JSON 配置文件中的值作为默认值。
+// CLI 参数优先级高于 JSON 配置。
+func applyJSONConfig(common *config.CommonConfig, pub *config.PubConfig, sub *config.SubConfig) {
+	if configFile == "" {
+		return
+	}
+	cfg, err := config.LoadJSON(configFile)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "警告: 加载配置文件失败: %v\n", err)
+		return
+	}
+	if cfg.Common != nil {
+		config.ApplyCommon(common, cfg.Common)
+	}
+	if pub != nil && cfg.Pub != nil {
+		if cfg.Pub.Common != nil {
+			config.ApplyCommon(common, cfg.Pub.Common)
+		}
+		if cfg.Pub.Topic != nil && pub.Topic == "" {
+			pub.Topic = *cfg.Pub.Topic
+		}
+		if cfg.Pub.QoS != nil {
+			pub.QoS = *cfg.Pub.QoS
+		}
+		if cfg.Pub.Size != nil && pub.Size == 256 {
+			pub.Size = *cfg.Pub.Size
+		}
+		if cfg.Pub.IntervalOfMsg != nil && pub.IntervalOfMsg == 1000 {
+			pub.IntervalOfMsg = *cfg.Pub.IntervalOfMsg
+		}
+		if cfg.Pub.Limit != nil && pub.Limit == 0 {
+			pub.Limit = *cfg.Pub.Limit
+		}
+	}
+	if sub != nil && cfg.Sub != nil {
+		if cfg.Sub.Common != nil {
+			config.ApplyCommon(common, cfg.Sub.Common)
+		}
+		if cfg.Sub.Topic != nil && sub.Topic == "" {
+			sub.Topic = *cfg.Sub.Topic
+		}
+		if cfg.Sub.QoS != nil {
+			sub.QoS = *cfg.Sub.QoS
+		}
+		if cfg.Sub.PayloadHdrs != nil && sub.PayloadHdrs == "" {
+			sub.PayloadHdrs = *cfg.Sub.PayloadHdrs
+		}
+	}
+}
+
+// startPrometheus 在 --prometheus 启用时启动 /metrics HTTP 端点。
+func startPrometheus(common config.CommonConfig, collector *stats.Collector) {
+	if common.Prometheus && common.RestAPI != "" {
+		exporter := stats.NewPrometheusExporter(collector)
+		if err := exporter.Start(common.RestAPI); err != nil {
+			fmt.Fprintf(os.Stderr, "启动 Prometheus 端点失败: %v\n", err)
+		}
+	}
+}
+
+// saveReport 在指定 --report 时导出压测报告。
+func saveReport(cmd string, runner bench.Runner, reporter *stats.Reporter) {
+	if reportFile == "" {
+		return
+	}
+	snap := runner.Stats().TakeSnapshot()
+	hist := runner.Histogram()
+	min, max, avg, p50, p90, p95, p99 := hist.Stats()
+
+	data := stats.ReportData{
+		Cmd:       cmd,
+		Elapsed:   reporter.Elapsed(),
+		Snap:      snap,
+		HistMin:   min,
+		HistMax:   max,
+		HistAvg:   avg,
+		HistP50:   p50,
+		HistP90:   p90,
+		HistP95:   p95,
+		HistP99:   p99,
+		HistCount: hist.Count(),
+	}
+	if err := stats.ExportReport(reportFile, data); err != nil {
+		fmt.Fprintf(os.Stderr, "导出报告失败: %v\n", err)
+	} else {
+		fmt.Fprintf(os.Stdout, "报告已导出到: %s\n", reportFile)
 	}
 }

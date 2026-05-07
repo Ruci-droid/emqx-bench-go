@@ -17,10 +17,11 @@ import (
 // PubRunner 负责发布压测：创建指定数量的发布客户端，按指定速率持续发布消息。
 type PubRunner struct {
 	*BaseRunner
-	cfg    config.PubConfig
-	hosts  []string      // 解析后的 Broker 地址列表
-	active atomic.Int32  // 当前活跃连接数
-	ready  atomic.Int32  // 已完成连接尝试的客户端数量
+	cfg      config.PubConfig
+	hosts    []string      // 解析后的 Broker 地址列表
+	ifAddrs  []string      // 解析后的本地绑定 IP 列表
+	active   atomic.Int32  // 当前活跃连接数
+	ready    atomic.Int32  // 已完成连接尝试的客户端数量
 
 	clients []*mqtt.Client
 	mu      sync.Mutex
@@ -36,6 +37,7 @@ func NewPubRunner(cfg config.PubConfig) (*PubRunner, error) {
 		BaseRunner: base,
 		cfg:        cfg,
 		hosts:      cfg.Common.Hosts(),
+		ifAddrs:    cfg.Common.IfAddrs(),
 	}, nil
 }
 
@@ -47,10 +49,6 @@ func (r *PubRunner) Run(ctx context.Context) error {
 
 	// 解析 payload headers
 	hdrs := parseHdrs(r.cfg.PayloadHdrs)
-	payloadBuilder, err := mqtt.NewPayloadBuilder(r.cfg.Size, r.cfg.Message, hdrs)
-	if err != nil {
-		return err
-	}
 
 	// 预渲染每个客户端的 topic，避免运行时重复计算
 	topics := make([]string, count)
@@ -90,6 +88,11 @@ func (r *PubRunner) Run(ctx context.Context) error {
 
 		topic := topics[i]
 
+		localAddr := ""
+		if len(r.ifAddrs) > 0 {
+			localAddr = r.ifAddrs[i%len(r.ifAddrs)]
+		}
+
 		client, err := mqtt.NewClient(mqtt.ClientOptions{
 			Index:         int64(i),
 			ClientID:      clientID,
@@ -102,7 +105,8 @@ func (r *PubRunner) Run(ctx context.Context) error {
 			CleanSession:  r.cfg.Common.Clean,
 			SessionExpiry: r.cfg.Common.SessionExpiry,
 			TLSConfig:     r.tlsConfig,
-			LocalAddr:     r.cfg.Common.IfAddr,
+			LocalAddr:     localAddr,
+			WebSocket:     r.cfg.Common.WS,
 			OnDisconnect: func(c *mqtt.Client, err error) {
 				r.collector.Disconnects.Add(1)
 				r.active.Add(-1)
@@ -145,9 +149,21 @@ func (r *PubRunner) Run(ctx context.Context) error {
 		r.clients = append(r.clients, client)
 		r.mu.Unlock()
 
+		// 每个客户端独立的 PayloadBuilder，保证 cnt64 按客户端递增
+		pb, err := mqtt.NewPayloadBuilder(r.cfg.Size, r.cfg.Message, hdrs)
+		if err != nil {
+			r.collector.ConnFailed.Add(1)
+			r.ready.Add(1)
+			zap.L().Error("创建 PayloadBuilder 失败",
+				zap.Int("index", i),
+				zap.Error(err),
+			)
+			continue
+		}
+
 		// 启动发布 goroutine
 		pubWg.Add(1)
-		go func(idx int, c *mqtt.Client, t string) {
+		go func(idx int, c *mqtt.Client, t string, payloadBuilder *mqtt.PayloadBuilder) {
 			defer pubWg.Done()
 
 			// 如果启用了 wait-before-publishing，等待所有客户端连接就绪
@@ -213,7 +229,7 @@ func (r *PubRunner) Run(ctx context.Context) error {
 				}
 				r.collector.PubTotal.Add(1)
 			}
-		}(i, client, topic)
+		}(i, client, topic, pb)
 
 		// 保活 goroutine，等待退出信号后断开连接
 		wg.Add(1)
