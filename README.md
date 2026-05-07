@@ -6,14 +6,10 @@
 
 ## 安装
 
-```bash
-go install emqx-bench-go@latest
-```
-
-或从源码编译：
+从源码编译：
 
 ```bash
-git clone https://github.com/example/go-mqtt-bench.git
+git clone https://github.com/Ruci-droid/emqx-bench-go.git
 cd go-mqtt-bench
 make build
 ```
