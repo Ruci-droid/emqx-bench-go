@@ -84,6 +84,8 @@ func NewClient(opts ClientOptions) (*Client, error) {
 	connOpts.SetKeepAlive(time.Duration(opts.KeepAlive) * time.Second)
 	connOpts.SetCleanSession(opts.CleanSession)
 	connOpts.SetAutoReconnect(false) // 断线重连由上层自行控制
+	connOpts.SetWriteTimeout(30 * time.Second) // 单次写操作超时
+	connOpts.SetOrderMatters(true)              // QoS 1/2 按序发送
 
 	// 设置 MQTT 协议版本
 	switch opts.Version {

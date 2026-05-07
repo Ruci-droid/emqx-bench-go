@@ -18,8 +18,9 @@ type Reporter struct {
 	ticker    *time.Ticker
 	done      chan struct{}
 	last      Snapshot
-	startTime time.Time
-	cmd       string // 命令类型: "conn", "pub", "sub"
+	startTime time.Time // 测试开始时间
+	lastTime  time.Time // 上次采样时间，用于计算瞬时速率
+	cmd       string    // 命令类型: "conn", "pub", "sub"
 }
 
 // NewReporter 创建 Reporter。
@@ -42,6 +43,7 @@ func (r *Reporter) SetOutput(w io.Writer) {
 func (r *Reporter) Start(interval time.Duration) {
 	r.ticker = time.NewTicker(interval)
 	r.startTime = time.Now()
+	r.lastTime = r.startTime
 	go r.loop()
 }
 
@@ -65,19 +67,28 @@ func (r *Reporter) loop() {
 }
 
 func (r *Reporter) report() {
+	now := time.Now()
 	cur := r.collector.TakeSnapshot()
-	elapsed := time.Since(r.startTime).Seconds()
+
+	// 总运行时间（用于展示）
+	totalElapsed := now.Sub(r.startTime).Seconds()
+	// 距上次采样的间隔（用于计算瞬时速率）
+	intervalElapsed := now.Sub(r.lastTime).Seconds()
+	if intervalElapsed <= 0 {
+		intervalElapsed = 1 // 防止除零
+	}
 
 	switch r.cmd {
 	case "conn":
-		r.reportConn(cur, elapsed)
+		r.reportConn(cur, totalElapsed)
 	case "pub":
-		r.reportPub(cur, elapsed)
+		r.reportPub(cur, intervalElapsed)
 	case "sub":
-		r.reportSub(cur, elapsed)
+		r.reportSub(cur, intervalElapsed)
 	}
 
 	r.last = cur
+	r.lastTime = now
 }
 
 func (r *Reporter) reportConn(cur Snapshot, elapsed float64) {
@@ -98,9 +109,8 @@ func (r *Reporter) reportPub(cur Snapshot, elapsed float64) {
 	}
 
 	fmt.Fprintf(r.output,
-		"发送(汇总): 总计=%d 速率=%.0f(条/秒) 流量=%s 成功=%d 失败=%d 飞行窗口=%d\n",
-		cur.PubSuccess, rate, formatBytes(bytesRate), cur.PubSuccess, cur.PubFailed,
-		cur.PubTotal-cur.PubSuccess-cur.PubFailed,
+		"发送(汇总): 总计=%d 速率=%.0f(条/秒) 流量=%s 成功=%d 失败=%d\n",
+		cur.PubTotal, rate, formatBytes(bytesRate), cur.PubSuccess, cur.PubFailed,
 	)
 
 	min, max, avg, p50, p90, p95, p99 := r.histogram.Stats()

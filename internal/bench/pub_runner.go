@@ -198,8 +198,6 @@ func (r *PubRunner) Run(ctx context.Context) error {
 				// 构建 payload（复用缓冲区）
 				buf = payloadBuilder.Build(buf)
 
-				r.collector.PubTotal.Add(1)
-
 				err := c.Publish(t, qos, retained, buf)
 				if err != nil {
 					r.collector.PubFailed.Add(1)
@@ -213,6 +211,7 @@ func (r *PubRunner) Run(ctx context.Context) error {
 					r.collector.PubBytes.Add(int64(len(buf)))
 					pubCounts[idx].Add(1)
 				}
+				r.collector.PubTotal.Add(1)
 			}
 		}(i, client, topic)
 
