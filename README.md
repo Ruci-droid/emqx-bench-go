@@ -10,9 +10,46 @@
 
 ```bash
 git clone https://github.com/Ruci-droid/emqx-bench-go.git
-cd go-mqtt-bench
-make build
+cd emqx-bench-go
 ```
+
+方式一：Makefile
+
+```bash
+make release-linux-amd64    # 仅 Linux amd64
+make release-linux-arm64    # 仅 Linux arm64
+make release-linux-arm32    # 仅 Linux arm32
+make release-linux          # Linux 全架构（上述三个）
+make release-windows-amd64  # 仅 Windows amd64
+make package                # 全平台编译 + 打包 tar.gz / zip
+```
+
+方式二：Shell 脚本（无需 make）
+
+```bash
+./scripts/build.sh linux      # Linux amd64 + arm64 + arm32
+./scripts/build.sh windows    # Windows amd64
+./scripts/build.sh all        # 全平台（含 macOS）
+./scripts/build.sh package    # 全平台编译 + 自动打包
+```
+
+产物格式
+
+```
+┌─────────┬─────────────────────────────────────┐
+│  平台   │              归档格式               │
+├─────────┼─────────────────────────────────────┤
+│ Linux   │ go-mqtt-bench-linux-amd64.tar.gz    │
+├─────────┼─────────────────────────────────────┤
+│ Linux   │ go-mqtt-bench-linux-arm64.tar.gz    │
+├─────────┼─────────────────────────────────────┤
+│ Linux   │ go-mqtt-bench-linux-arm32.tar.gz    │
+├─────────┼─────────────────────────────────────┤
+│ Windows │ go-mqtt-bench-windows-amd64.exe.zip │
+└─────────┴─────────────────────────────────────┘
+```
+
+所有产物在 build/ 目录，编译时自动注入版本号（从 git tag 读取，否则为 dev）。
 
 ## 快速开始
 
